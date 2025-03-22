@@ -1,4 +1,5 @@
 use engine::models::{Position};
+use starknet::ContractAddress;
 
 #[starknet::interface]
 pub trait IPlay<T> {
@@ -7,7 +8,7 @@ pub trait IPlay<T> {
 
 #[dojo::contract]
 pub mod play {
-    use super::{IPlay, Position, array_contains_position};
+    use super::{IPlay, Position, array_contains_position, array_contains_address};
     use starknet::{ContractAddress, get_caller_address};
     use engine::models::{Board, Player};
 
@@ -37,72 +38,54 @@ pub mod play {
         fn mark(ref self: ContractState, position: Position) {
             let mut world = self.world_default();
             let player = get_caller_address();
-
-            let player_info: Player = world.read_model(player);
+            let mut player_info: Player = world.read_model(player);
             let board: Board = world.read_model(player_info.match_id);
 
+            // Ensure caller is in players array.
+            assert(array_contains_address(@board.players, player), 'Not in this match');
             assert(board.active, 'Match no longer active');
             assert(board.ready, 'Match not ready');
-            assert(board.x == player || board.o == player, 'Not in this match');
             assert(player_info.turn, 'Not your turn');
             assert(array_contains_position(@board.empty, position), 'Position already marked');
 
-            let mut player_x: Player = world.read_model(board.x);
-            let mut player_o: Player = world.read_model(board.o);
-
-            let board_empty = board.empty;
-            let mut board_x = player_x.marks;
-            let mut board_o = player_o.marks;
-
+            // Remove marked position.
             let mut empty_board: Array<Position> = array![];
-            for pos in board_empty {
+            for pos in board.empty {
                 if pos != position {
                     empty_board.append(pos);
                 }
             };
 
-            if player == board.x {
-                board_x.append(position);
-                player_x =
-                    Player {
-                        address: player_x.address,
-                        match_id: player_x.match_id,
-                        marks: board_x,
-                        turn: false,
-                    };
-                player_o =
-                    Player {
-                        address: player_o.address,
-                        match_id: player_o.match_id,
-                        marks: board_o,
-                        turn: true,
-                    };
-                world.write_model(@player_o);
-                world.write_model(@player_x);
-            } else {
-                board_o.append(position);
-                player_o =
-                    Player {
-                        address: player_o.address,
-                        match_id: player_o.match_id,
-                        marks: board_o,
-                        turn: false,
-                    };
-                player_x =
-                    Player {
-                        address: player_x.address,
-                        match_id: player_x.match_id,
-                        marks: board_x,
-                        turn: true,
-                    };
-                world.write_model(@player_x);
-                world.write_model(@player_o);
-            }
+            // Update current player's marks.
+            player_info.marks.append(position);
+            // Turn switching: compute next player's index.
+            let mut current_index = 0;
+            for i in 0..board.players.len() {
+                if board.players[i] == @player {
+                    current_index = i;
+                    break;
+                }
+            };
+            let next_index = (current_index + 1) % board.players.len().into();
+            let next_player = board.players[next_index];
+
+            let board_players = board.players.clone();
+            //Update turn flags for all players.
+            for p in board_players {
+                let mut p_info: Player = world.read_model(p);
+                if p == player {
+                    p_info.turn = false;
+                } else if p == *next_player {
+                    p_info.turn = true;
+                } else {
+                    p_info.turn = false;
+                }
+                world.write_model(@p_info);
+            };
 
             let new_board = Board {
                 match_id: board.match_id,
-                x: board.x,
-                o: board.o,
+                players: board.players,
                 empty: empty_board,
                 winner: board.winner,
                 active: board.active,
@@ -110,8 +93,10 @@ pub mod play {
             };
 
             world.write_model(@new_board);
-            world.emit_event(@Marked { player, position, symbol: player == board.x });
+            // For backward compatibility, symbol is set true.
+            world.emit_event(@Marked { player, position, symbol: true });
 
+            // ...existing win checks...
             let updated_player: Player = world.read_model(player);
 
             if array_contains_position(@updated_player.marks, Position { i: position.i, j: 1 })
@@ -145,7 +130,6 @@ pub mod play {
             };
 
             let zero_address: ContractAddress = 0.try_into().unwrap();
-
             if new_board.empty.len() == 0 {
                 self.end(updated_player.match_id, zero_address, true);
             };
@@ -163,23 +147,23 @@ pub mod play {
 
             let board: Board = world.read_model(match_id);
 
+            let board_players = board.players.clone();
+
             let new_board = Board {
                 match_id: board.match_id,
-                x: board.x,
-                o: board.o,
+                players: board.players,
                 empty: board.empty,
                 winner,
                 active: false,
                 ready: true,
             };
 
-            let player_x = Player { address: board.x, match_id: 0, marks: array![], turn: false };
-
-            let player_o = Player { address: board.o, match_id: 0, marks: array![], turn: false };
+            for p in board_players {
+                let player = Player { address: p, match_id: 0, marks: array![], turn: false };
+                world.write_model(@player);
+            };
 
             world.write_model(@new_board);
-            world.write_model(@player_x);
-            world.write_model(@player_o);
             world.emit_event(@Ended { match_id: board.match_id, winner, finished });
         }
     }
@@ -195,3 +179,15 @@ pub fn array_contains_position(array: @Array<Position>, position: Position) -> b
     };
     res
 }
+
+pub fn array_contains_address(array: @Array<ContractAddress>, addr: ContractAddress) -> bool {
+    let mut found = false;
+    for i in 0..array.len() {
+        if array[i] == @addr {
+            found = true;
+            break;
+        }
+    };
+    found
+}
+

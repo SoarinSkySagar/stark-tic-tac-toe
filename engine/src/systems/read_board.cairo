@@ -2,7 +2,7 @@ use engine::models::{Position};
 
 #[starknet::interface]
 pub trait IReadBoard<T> {
-    fn read_board(self: @T) -> (Array<Position>, Array<Position>, Array<Position>);
+    fn read_board(self: @T) -> (Array<Position>, Array<Array<Position>>);
 }
 
 #[dojo::contract]
@@ -15,20 +15,19 @@ pub mod read_board {
 
     #[abi(embed_v0)]
     impl ActionsImpl of IReadBoard<ContractState> {
-        fn read_board(self: @ContractState) -> (Array<Position>, Array<Position>, Array<Position>) {
+        fn read_board(self: @ContractState) -> (Array<Position>, Array<Array<Position>>) {
             let mut world = self.world_default();
             let player = get_caller_address();
             let player_info: Player = world.read_model(player);
             let board: Board = world.read_model(player_info.match_id);
 
-            let player_x: Player = world.read_model(board.x);
-            let player_o: Player = world.read_model(board.o);
-
             let board_empty = board.empty;
-            let board_x = player_x.marks;
-            let board_o = player_o.marks;
-
-            (board_empty, board_x, board_o)
+            let mut all_marks: Array<Array<Position>> = array![];
+            for p in board.players {
+                let info: Player = world.read_model(p);
+                all_marks.append(info.marks);
+            };
+            (board_empty, all_marks)
         }
     }
 
@@ -39,3 +38,4 @@ pub mod read_board {
         }
     }
 }
+

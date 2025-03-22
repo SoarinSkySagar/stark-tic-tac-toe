@@ -26,13 +26,12 @@ pub mod start {
         pub server: u8,
     }
 
-    #[derive(Copy, Drop, Serde)]
+    #[derive(Drop, Serde)]
     #[dojo::event]
     pub struct Started {
         #[key]
         pub match_id: u32,
-        pub x: ContractAddress,
-        pub o: ContractAddress,
+        pub players: Array<ContractAddress>,
     }
 
     #[abi(embed_v0)]
@@ -47,20 +46,20 @@ pub mod start {
                 let zero_address: ContractAddress = 0.try_into().unwrap();
                 let match_id: u32 = 123456;
                 let mut empty_board: Array<Position> = array![];
-                for i in 1..4_u8 {
-                    for j in 1..4_u8 {
+                // Generate a 9x9 board (i:1..10, j:1..10)
+                for i in 1..10_u8 {
+                    for j in 1..10_u8 {
                         empty_board.append(Position { i, j });
                     }
                 };
 
                 let board = Board {
                     match_id,
-                    x: player,
-                    o: zero_address,
+                    players: array![player],
                     empty: empty_board,
                     winner: zero_address,
                     active: true,
-                    ready: false,
+                    ready: false // not ready until full (9 players)
                 };
 
                 let player_info = Player {
@@ -76,15 +75,18 @@ pub mod start {
                 world.emit_event(@Created { match_id, server: 1 });
             } else {
                 let board: Board = world.read_model(matchmaker.last_board);
-
+                // Append the new player
+                let mut new_players = board.players;
+                new_players.append(player);
+                // Mark ready if 9 players joined.
+                let is_ready = new_players.len() == 9;
                 let new_board = Board {
                     match_id: board.match_id,
-                    x: board.x,
-                    o: player,
+                    players: new_players,
                     empty: board.empty,
                     winner: board.winner,
                     active: board.active,
-                    ready: true,
+                    ready: is_ready,
                 };
 
                 let player_info = Player {
@@ -96,10 +98,12 @@ pub mod start {
                 world
                     .write_model(
                         @Matchmaker {
-                            server: 1, last_board: matchmaker.last_board, last_board_ready: true,
+                            server: 1,
+                            last_board: matchmaker.last_board,
+                            last_board_ready: is_ready,
                         },
                     );
-                world.emit_event(@Started { match_id: board.match_id, x: board.x, o: player });
+                world.emit_event(@Started { match_id: board.match_id, players: new_board.players });
             }
         }
         fn start_private(ref self: ContractState) {
@@ -111,20 +115,20 @@ pub mod start {
             let match_id: u32 = self._generate_match_id(player, world);
 
             let mut empty_board: Array<Position> = array![];
-            for i in 1..4_u8 {
-                for j in 1..4_u8 {
+            // Generate a 9x9 board
+            for i in 1..10_u8 {
+                for j in 1..10_u8 {
                     empty_board.append(Position { i, j });
                 }
             };
 
             let board = Board {
                 match_id,
-                x: player,
-                o: zero_address,
+                players: array![player],
                 empty: empty_board,
                 winner: zero_address,
                 active: true,
-                ready: true,
+                ready: false,
             };
 
             let player_info = Player { address: player, match_id, marks: array![], turn: false };
@@ -133,7 +137,7 @@ pub mod start {
             world.write_model(@board);
             world
                 .write_model(
-                    @Matchmaker { server: 1, last_board: match_id, last_board_ready: true },
+                    @Matchmaker { server: 1, last_board: match_id, last_board_ready: false },
                 );
             world.emit_event(@Created { match_id, server: 1 });
         }
@@ -144,15 +148,16 @@ pub mod start {
             let matchmaker: Matchmaker = world.read_model(1);
 
             let board: Board = world.read_model(match_id);
-
+            let mut new_players = board.players;
+            new_players.append(player);
+            let is_ready = new_players.len() == 9;
             let new_board = Board {
                 match_id,
-                x: board.x,
-                o: player,
+                players: new_players,
                 empty: board.empty,
                 winner: board.winner,
                 active: board.active,
-                ready: true,
+                ready: is_ready,
             };
 
             let player_info = Player {
@@ -164,10 +169,10 @@ pub mod start {
             world
                 .write_model(
                     @Matchmaker {
-                        server: 1, last_board: matchmaker.last_board, last_board_ready: true,
+                        server: 1, last_board: matchmaker.last_board, last_board_ready: is_ready,
                     },
                 );
-            world.emit_event(@Started { match_id: board.match_id, x: board.x, o: player });
+            world.emit_event(@Started { match_id: board.match_id, players: new_board.players });
         }
     }
 
@@ -202,3 +207,4 @@ pub mod start {
         }
     }
 }
+

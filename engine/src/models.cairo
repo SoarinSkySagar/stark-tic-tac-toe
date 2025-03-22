@@ -14,8 +14,7 @@ pub struct Matchmaker {
 pub struct Board {
     #[key]
     pub match_id: u32,
-    pub x: ContractAddress,
-    pub o: ContractAddress,
+    pub players: Array<ContractAddress>,
     pub empty: Array<Position>,
     pub winner: ContractAddress,
     pub active: bool,
@@ -37,3 +36,4 @@ pub struct Position {
     pub i: u8,
     pub j: u8,
 }
+
